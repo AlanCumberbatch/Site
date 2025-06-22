@@ -1,6 +1,6 @@
 <template>
   <section id="experience" class="experience-section">
-    <h2 class="section-title">项目经验</h2>
+    <h2 class="section-title">个人简历</h2>
     <div class="timeline-container">
       <div class="timeline-line"></div>
 
