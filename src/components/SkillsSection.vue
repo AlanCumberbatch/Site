@@ -35,6 +35,14 @@ let textParticleScene: THREE.Scene
 let textParticleCamera: THREE.PerspectiveCamera
 let animationId1: number
 
+// 动画状态
+let isTransitioning = false
+let transitionStartTime = 0
+let oldParticles: THREE.Mesh[] = []
+let newParticles: THREE.Mesh[] = []
+let oldTargetPositions: THREE.Vector3[] = []
+let newStartPositions: THREE.Vector3[] = []
+
 // 技能分类
 const skillCategories = [
   { key: 'frontend', name: '前端', icon: '💻' },
@@ -44,66 +52,56 @@ const skillCategories = [
   { key: 'tools', name: '工具 & 部署', icon: '🛠️' }
 ]
 
-// 各分类的技能关键词和对应的官方颜色
+// 各分类的技能关键词
 const skillKeywordsByCategory = {
   frontend: ['REACT', 'VUE.JS', 'HTML5', 'CSS3', 'SASS', 'WEBPACK', 'VITE'],
-  '3d': ['THREE.JS', 'CESIUMJS', 'D3.JS', 'CANVAS', 'WEBGL', 'WEBGPU'],
-  language: ['JAVASCRIPT', 'TYPESCRIPT', 'C++', 'PYTHON'],
+  '3d': ['THREE.JS', 'WEBGL', 'CESIUMJS', 'D3.JS', 'CANVAS', 'WEBGPU'],
+  language: ['JAVASCRIPT', 'TYPESCRIPT', 'C++', 'PYTHON', 'JAVA'],
   backend: ['NODE.JS', 'EXPRESS', 'MONGODB', 'POSTGRESQL', 'REDIS', 'REST API'],
   tools: ['GIT', 'AWS', 'DOCKER', 'LINUX', 'NPM', 'YARN']
 }
 
 // 各技术的官方颜色
 const technologyColors = {
-  // 前端技术
-  'REACT': 0x61dafb,        // React 蓝色
-  'VUE.JS': 0x42b883,       // Vue 绿色
-  'HTML5': 0xe34c26,        // HTML5 橙色
-  'CSS3': 0x1572b6,         // CSS3 蓝色
-  'SASS': 0xcc6699,         // Sass 粉色
-  'WEBPACK': 0x8dd6f9,      // Webpack 蓝色
-  'VITE': 0x646cff,         // Vite 紫色
-
-  // 3D & 可视化
-  'THREE.JS': 0x667eea,     // Three.js 蓝色
-  'WEBGL': 0x990000,        // WebGL 红色
-  'CESIUMJS': 0x6cbd45,     // CesiumJS 绿色
-  'D3.JS': 0xff7f0e,        // D3.js 橙色
-  'CANVAS': 0xffffff,       // Canvas 白色
-  'WEBGPU': 0x00aaff,       // WebGPU 蓝色
-
-  // 开发语言
-  'JAVASCRIPT': 0xf7df1e,   // JavaScript 黄色
-  'TYPESCRIPT': 0x3178c6,   // TypeScript 蓝色
-  'C++': 0x00599c,          // C++ 蓝色
-  'PYTHON': 0x3776ab,       // Python 蓝色
-  'JAVA': 0xed8b00,         // Java 橙色
-
-  // 后端 & 数据库
-  'NODE.JS': 0x3c873a,      // Node.js 绿色
-  'EXPRESS': 0x000000,      // Express 黑色
-  'MONGODB': 0x4db33d,      // MongoDB 绿色
-  'POSTGRESQL': 0x336791,   // PostgreSQL 蓝色
-  'REDIS': 0xdc382d,        // Redis 红色
-  'REST API': 0x00d4aa,     // REST API 青色
-
-  // 工具 & 部署
-  'GIT': 0xf05032,          // Git 橙色
-  'AWS': 0xff9900,          // AWS 橙色
-  'DOCKER': 0x2496ed,       // Docker 蓝色
-  'LINUX': 0xfcc624,        // Linux 黄色
-  'NPM': 0xcb3837,          // npm 红色
-  'YARN': 0x2c8ebb          // Yarn 蓝色
+  'REACT': 0x61dafb,
+  'VUE.JS': 0x42b883,
+  'HTML5': 0xe34c26,
+  'CSS3': 0x1572b6,
+  'SASS': 0xcc6699,
+  'WEBPACK': 0x8dd6f9,
+  'VITE': 0x646cff,
+  'THREE.JS': 0x667eea,
+  'WEBGL': 0x990000,
+  'CESIUMJS': 0x6cbd45,
+  'D3.JS': 0xff7f0e,
+  'CANVAS': 0xffffff,
+  'WEBGPU': 0x00aaff,
+  'JAVASCRIPT': 0xf7df1e,
+  'TYPESCRIPT': 0x3178c6,
+  'C++': 0x00599c,
+  'PYTHON': 0x3776ab,
+  'JAVA': 0xed8b00,
+  'NODE.JS': 0x3c873a,
+  'EXPRESS': 0x000000,
+  'MONGODB': 0x4db33d,
+  'POSTGRESQL': 0x336791,
+  'REDIS': 0xdc382d,
+  'REST API': 0x00d4aa,
+  'GIT': 0xf05032,
+  'AWS': 0xff9900,
+  'DOCKER': 0x2496ed,
+  'LINUX': 0xfcc624,
+  'NPM': 0xcb3837,
+  'YARN': 0x2c8ebb
 }
 
 const activeCategory = ref('frontend')
 
 const switchCategory = (categoryKey: string) => {
+  if (isTransitioning) return // 防止重复点击
+
   activeCategory.value = categoryKey
-  if (textParticleScene) {
-    textParticleScene.clear()
-  }
-  initTextParticle()
+  startTransition()
 }
 
 const getActiveCategoryName = () => {
@@ -111,7 +109,7 @@ const getActiveCategoryName = () => {
   return category ? category.name : ''
 }
 
-// 文字粒子化 - 竖着展示
+// 文字粒子化
 const createTextParticles = (text: string, color: number, offsetX: number, offsetY: number) => {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
@@ -156,7 +154,9 @@ const createTextParticles = (text: string, color: number, offsetX: number, offse
         )
 
         mesh.userData = {
-          originalPosition: mesh.position.clone()
+          originalPosition: mesh.position.clone(),
+          targetPosition: mesh.position.clone(),
+          startPosition: mesh.position.clone()
         }
 
         particles.push(mesh)
@@ -166,8 +166,61 @@ const createTextParticles = (text: string, color: number, offsetX: number, offse
   return particles
 }
 
+// 开始过渡动画
+const startTransition = () => {
+  isTransitioning = true
+  transitionStartTime = Date.now()
+
+  // 保存当前粒子，但不从场景中移除
+  oldParticles = [...textParticleScene.children] as THREE.Mesh[]
+  oldTargetPositions = oldParticles.map(particle => {
+    const randomAngle = Math.random() * Math.PI * 2
+    const randomRadius = 10 + Math.random() * 20
+    return new THREE.Vector3(
+      Math.cos(randomAngle) * randomRadius,
+      Math.sin(randomAngle) * randomRadius,
+      (Math.random() - 0.5) * 10
+    )
+  })
+
+  // 创建新粒子，但不清除旧粒子
+  const currentKeywords = skillKeywordsByCategory[activeCategory.value as keyof typeof skillKeywordsByCategory]
+  newParticles = []
+
+  currentKeywords.forEach((keyword, idx) => {
+    const color = technologyColors[keyword as keyof typeof technologyColors] || 0x667eea
+    const particles = createTextParticles(
+      keyword,
+      color,
+      0,
+      1 - idx * 1.1
+    )
+
+    particles.forEach(particle => {
+      // 设置起始位置为随机爆炸位置
+      const randomAngle = Math.random() * Math.PI * 2
+      const randomRadius = 15 + Math.random() * 25
+      particle.position.set(
+        Math.cos(randomAngle) * randomRadius,
+        Math.sin(randomAngle) * randomRadius,
+        (Math.random() - 0.5) * 15
+      )
+
+      particle.userData.startPosition = particle.position.clone()
+      particle.userData.targetPosition = particle.userData.originalPosition.clone()
+
+      // 初始透明度为0
+      particle.material.opacity = 0
+
+      newParticles.push(particle)
+      textParticleScene.add(particle)
+    })
+  })
+
+  newStartPositions = newParticles.map(particle => particle.position.clone())
+}
+
 const initTextParticle = () => {
-  // 获取整个 section 的尺寸
   const sectionElement = document.querySelector('.skills-section') as HTMLElement
   const width = sectionElement ? sectionElement.offsetWidth : window.innerWidth
   const height = sectionElement ? sectionElement.offsetHeight : window.innerHeight
@@ -192,16 +245,13 @@ const initTextParticle = () => {
 
   const currentKeywords = skillKeywordsByCategory[activeCategory.value as keyof typeof skillKeywordsByCategory]
 
-  // 竖着展示 - 使用官方颜色
   currentKeywords.forEach((keyword, idx) => {
-    // 获取技术的官方颜色，如果没有则使用默认颜色
     const color = technologyColors[keyword as keyof typeof technologyColors] || 0x667eea
-
     const particles = createTextParticles(
       keyword,
       color,
-      0,  // 水平居中
-      1 - idx * 1.1  // 向下移动开始位置
+      0,
+      1 - idx * 1.1
     )
     particles.forEach(particle => {
       textParticleScene.add(particle)
@@ -213,22 +263,88 @@ const initTextParticle = () => {
   }
 }
 
-// 动画效果
+// 增强的动画效果
 const animateTextParticle = () => {
   animationId1 = requestAnimationFrame(animateTextParticle)
 
-  textParticleScene.children.forEach((child) => {
-    if (child instanceof THREE.Mesh && child.userData.originalPosition) {
-      const time = Date.now() * 0.001
-      const originalPos = child.userData.originalPosition
+  const currentTime = Date.now()
 
-      child.position.x = originalPos.x + Math.sin(time + child.position.x) * 0.08
-      child.position.y = originalPos.y + Math.cos(time + child.position.y) * 0.08
-      child.position.z = originalPos.z + Math.sin(time * 0.5) * 0.05
-      child.rotation.x += 0.03
-      child.rotation.y += 0.03
+  if (isTransitioning) {
+    const elapsed = currentTime - transitionStartTime
+    const duration = 1500 // 1.5秒过渡时间
+    const progress = Math.min(elapsed / duration, 1)
+
+    // 使用缓动函数
+    const easeOut = 1 - Math.pow(1 - progress, 3)
+    const easeIn = Math.pow(progress, 3)
+
+    // 动画旧粒子爆炸消散
+    oldParticles.forEach((particle, idx) => {
+      if (particle && oldTargetPositions[idx]) {
+        const startPos = particle.userData.originalPosition
+        const targetPos = oldTargetPositions[idx]
+
+        // 旧粒子向随机方向爆炸
+        particle.position.lerpVectors(startPos, targetPos, easeOut)
+
+        // 旧粒子逐渐消失
+        particle.material.opacity = 0.8 * (1 - easeOut)
+
+        // 添加旋转效果
+        particle.rotation.x += 0.1
+        particle.rotation.y += 0.1
+      }
+    })
+
+    // 动画新粒子重组
+    newParticles.forEach((particle, idx) => {
+      if (particle && newStartPositions[idx]) {
+        const startPos = newStartPositions[idx]
+        const targetPos = particle.userData.targetPosition
+
+        // 新粒子从随机位置向目标位置聚集
+        particle.position.lerpVectors(startPos, targetPos, easeIn)
+
+        // 新粒子逐渐出现
+        particle.material.opacity = 0.8 * easeIn
+
+        // 添加旋转效果
+        particle.rotation.x += 0.1
+        particle.rotation.y += 0.1
+      }
+    })
+
+    // 过渡完成
+    if (progress >= 1) {
+      isTransitioning = false
+
+      // 移除旧粒子
+      oldParticles.forEach(particle => {
+        textParticleScene.remove(particle)
+        particle.geometry.dispose()
+        particle.material.dispose()
+      })
+
+      oldParticles = []
+      newParticles = []
+      oldTargetPositions = []
+      newStartPositions = []
     }
-  })
+  } else {
+    // 正常动画
+    textParticleScene.children.forEach((child) => {
+      if (child instanceof THREE.Mesh && child.userData.originalPosition) {
+        const time = currentTime * 0.001
+        const originalPos = child.userData.originalPosition
+
+        child.position.x = originalPos.x + Math.sin(time + child.position.x) * 0.08
+        child.position.y = originalPos.y + Math.cos(time + child.position.y) * 0.08
+        child.position.z = originalPos.z + Math.sin(time * 0.5) * 0.05
+        child.rotation.x += 0.03
+        child.rotation.y += 0.03
+      }
+    })
+  }
 
   textParticleScene.rotation.y += 0.008
   textParticleRenderer?.render(textParticleScene, textParticleCamera)
@@ -241,7 +357,6 @@ onMounted(async () => {
     initTextParticle()
   }, 100)
 
-  // 监听窗口大小变化
   window.addEventListener('resize', () => {
     if (textParticleRenderer && textParticleScene) {
       const sectionElement = document.querySelector('.skills-section') as HTMLElement
